@@ -43,6 +43,9 @@ var uploadProwJobCmd = &cobra.Command{
 }
 
 func run(prowJobURL string) error {
+
+	prowJobURLTokens := strings.Split(prowJobURL, "/")
+	prowJobID := prowJobURLTokens[len(prowJobURLTokens)-1]
 	client, err := opensearch.NewClient(opensearch.Config{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -86,7 +89,7 @@ func run(prowJobURL string) error {
 			return err
 		}
 
-		err = uploader.ParseAndUpload(dlfp)
+		err = uploader.ParseAndUpload(prowJobID, dlfp)
 		if err != nil {
 			return err
 		}

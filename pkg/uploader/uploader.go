@@ -17,13 +17,15 @@ type MonitorEvent struct {
 	Message string    `json:"message"`
 	From    time.Time `json:"from"`
 	To      time.Time `json:"to"`
+	File    string    `json:"file"`
+	ProwJob string    `json:"prowJob"`
 }
 
 type MonitorEventList struct {
 	Items []MonitorEvent `json:"items"`
 }
 
-func ParseAndUpload(fp string) error {
+func ParseAndUpload(prowJobID, fp string) error {
 	jsonFile, err := os.Open(fp)
 	if err != nil {
 		return err
@@ -35,7 +37,7 @@ func ParseAndUpload(fp string) error {
 	}
 
 	if strings.HasPrefix(filepath.Base(fp), "e2e-events_") {
-		err := parseAndUploadMonitorEvents(byteValue)
+		err := parseAndUploadMonitorEvents(prowJobID, fp, byteValue)
 		if err != nil {
 			return err
 		}
@@ -44,14 +46,17 @@ func ParseAndUpload(fp string) error {
 	return nil
 }
 
-func parseAndUploadMonitorEvents(byteValue []byte) error {
+func parseAndUploadMonitorEvents(prowJobID, fp string, byteValue []byte) error {
 	var items MonitorEventList
 	err := json.Unmarshal(byteValue, &items)
 	if err != nil {
 		return err
 	}
 	for _, item := range items.Items {
-		log.Debugf("got item: %v", item)
+		// Add in some additional fields before uploading to opensearch:
+		item.File = filepath.Base(fp)
+		item.ProwJob = prowJobID
+		log.Infof("got item: %v", item)
 	}
 	return nil
 }
