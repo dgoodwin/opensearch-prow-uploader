@@ -2,9 +2,15 @@ package cmd
 
 import (
 	"crypto/tls"
+	"fmt"
+	"io/ioutil"
 	"net/http"
+	"net/url"
+	"os"
 	"regexp"
+	"strings"
 
+	"github.com/dgoodwin/opensearch-prow-uploader/pkg/downloader"
 	"github.com/dgoodwin/opensearch-prow-uploader/pkg/gcsscanner"
 	"github.com/opensearch-project/opensearch-go"
 	"github.com/pkg/errors"
@@ -24,7 +30,6 @@ var uploadProwJobCmd = &cobra.Command{
 	Use:   "upload-prow-job [prowJobURL]",
 	Short: "Upload artifacts from an OpenShift CI prow job to OpenSearch",
 	Run: func(cmd *cobra.Command, args []string) {
-		log.SetLevel(log.DebugLevel)
 		if len(args) < 1 {
 			log.Fatal("missing required argument for prowJobURL")
 		}
@@ -61,8 +66,25 @@ func run(prowJobURL string) error {
 	if err != nil {
 		return err
 	}
-	for _, fu := range fileURLs {
-		log.WithField("file", fu).Info("found file to upload")
+
+	dir, err := ioutil.TempDir("", "opensearch-prow-uploader-")
+	if err != nil {
+		return err
+	}
+	log.WithField("dir", dir).Info("created temporary directory")
+	defer os.RemoveAll(dir)
+
+	for i, fu := range fileURLs {
+		// Replace our gcs web UI with storage.googleapis.com for better downloading:
+		gcsPrefix := "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com"
+		storagePrefix := "https://storage.googleapis.com"
+		tempURL := strings.Replace(fu.String(), gcsPrefix+"/gcs", storagePrefix, -1)
+		newURL, err := url.Parse(tempURL)
+		if err != nil {
+			return fmt.Errorf("failed to parse URL from %s: %v", fu, err)
+		}
+		fileURLs[i] = newURL
+		downloader.DownloadFile(dir, fileURLs[i])
 	}
 	return nil
 }

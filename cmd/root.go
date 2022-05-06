@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/spf13/viper"
@@ -17,7 +18,9 @@ var rootCmd = &cobra.Command{
 	Short: "CLI to upload OpenShift CI prow artifacts to TRT OpenSearch",
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	Run: func(cmd *cobra.Command, args []string) {
+		log.SetLevel(log.InfoLevel)
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
