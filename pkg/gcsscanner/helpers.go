@@ -95,7 +95,7 @@ func GetMatchingLinksFromURL(baseURL string, regexes []*regexp.Regexp, onlyMatch
 			if (onlyMatchLastSegment && re.Match([]byte(lastPathSegment))) ||
 				(!onlyMatchLastSegment && re.Match([]byte(link))) {
 
-				log.WithField("link", link).Debug("found link match")
+				log.WithField("link", link).Info("found link match")
 				matchedLinks = append(matchedLinks, link)
 			}
 		}

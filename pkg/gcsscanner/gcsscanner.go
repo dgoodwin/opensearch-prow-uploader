@@ -1,10 +1,8 @@
 package gcsscanner
 
 import (
-	"fmt"
 	"net/url"
 	"regexp"
-	"strings"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -12,8 +10,8 @@ import (
 // Scanner locates files in the artifacts Google Cloud Storage sub-buckets for a given prow job URL.
 type Scanner struct{}
 
-func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Regexp) ([]string, error) {
-	foundFiles := []string{}
+func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Regexp) ([]*url.URL, error) {
+	foundFiles := []*url.URL{}
 
 	/*
 		prowToplinks, err := GetLinksFromURL(baseURL)
@@ -43,13 +41,13 @@ func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Re
 	// Find the link to gcs artifacts on the prow job page:
 	gcsURL, err := GetMatchingLinkFromURL(baseURL, regexp.MustCompile(".*gcsweb.*"), false)
 	if err != nil {
-		return []string{}, err
+		return []*url.URL{}, err
 	}
 	log.WithField("gcsURL", gcsURL).Info("found GCS URL")
 
 	artifactsURL, err := GetMatchingLinkFromURL(gcsURL.String(), regexp.MustCompile("artifacts"), true)
 	if err != nil {
-		return []string{}, err
+		return []*url.URL{}, err
 	}
 	log.WithField("artifactsURL", artifactsURL).Info("found artifacts URL")
 
@@ -57,76 +55,34 @@ func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Re
 	// i.e. e2e-gcp-ovn-upgrade
 	e2eURL, err := GetMatchingLinkFromURL(artifactsURL.String(), regexp.MustCompile(".*e2e.*"), true)
 	if err != nil {
-		return []string{}, err
+		return []*url.URL{}, err
 	}
 	log.WithField("e2eURL", e2eURL).Info("found e2eURL")
 
-	/*
-		artifactLinksToplinks, err := GetLinksFromURL(artifactsURL.String())
-		if err != nil {
-			return []string{}, fmt.Errorf("failed to fetch artifacts link at %s: %v", gcsURL, err)
-		}
-		if len(artifactLinksToplinks) == 0 {
-			return []string{}, fmt.Errorf("no artifact links at %s found", gcsURL)
-		}
-		tmpE2eURL := ""
-		for _, link := range artifactLinksToplinks {
-			log.WithField("link", link).Debug("found link")
-			linkSplitBySlash := strings.Split(link, "/")
-			lastPathSegment := linkSplitBySlash[len(linkSplitBySlash)-1]
-			if len(lastPathSegment) == 0 {
-				lastPathSegment = linkSplitBySlash[len(linkSplitBySlash)-2]
-			}
-			log.Debugf("lastPathSection: %s", lastPathSegment)
-			if strings.Contains(lastPathSegment, e2ePrefix) {
-				tmpE2eURL = gcsPrefix + link
-				break
-			}
-		}
-		if tmpE2eURL == "" {
-			return []string{}, fmt.Errorf("failed to find e2e link in %v", artifactLinksToplinks)
-		}
-		e2eURL, err := url.Parse(tmpE2eURL)
-		if err != nil {
-			return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpE2eURL, err)
-		}
-
-		log.WithField("e2eURL", e2eURL).Info("found e2e link")
-
-	*/
-
-	// Support new-style jobs - look for gather-extra
-	var gatherMustGatherURL *url.URL
-
-	e2eToplinks, err := GetLinksFromURL(e2eURL.String())
+	// Locate gather-extra/artifacts/ for some files:
+	gatherExtraURL, err := GetMatchingLinkFromURL(e2eURL.String(), regexp.MustCompile("gather-extra"), true)
 	if err != nil {
-		return []string{}, fmt.Errorf("failed to fetch artifacts link at %s: %v", e2eURL, err)
+		return []*url.URL{}, err
 	}
-	if len(e2eToplinks) == 0 {
-		return []string{}, fmt.Errorf("no top links at %s found", e2eURL)
+	gatherExtraURL, err = GetMatchingLinkFromURL(gatherExtraURL.String(), regexp.MustCompile("artifacts"), true)
+	if err != nil {
+		return []*url.URL{}, err
 	}
-	for _, link := range e2eToplinks {
-		log.WithField("link", link).Debug("found link")
-		linkSplitBySlash := strings.Split(link, "/")
-		lastPathSegment := linkSplitBySlash[len(linkSplitBySlash)-1]
-		if len(lastPathSegment) == 0 {
-			lastPathSegment = linkSplitBySlash[len(linkSplitBySlash)-2]
-		}
-		log.Debugf("lastPathSection: %s", lastPathSegment)
-		if lastPathSegment == mustGatherFolderPath {
-			tmpMustGatherURL := gcsPrefix + link
-			gatherMustGatherURL, err = url.Parse(tmpMustGatherURL)
-			if err != nil {
-				return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpMustGatherURL, err)
-			}
-			break
-		}
-	}
+	log.WithField("gatherExtraURL", gatherExtraURL).Info("found gatherExtraURL")
 
-	if gatherMustGatherURL != nil {
-		e2eToplinks, err = GetLinksFromURL(gatherMustGatherURL.String())
+	kubeEventsURL, err := GetMatchingLinkFromURL(gatherExtraURL.String(), regexp.MustCompile("events.json"), true)
+	if err != nil {
+		return []*url.URL{}, err
+	}
+	foundFiles = append(foundFiles, kubeEventsURL)
+
+	/*
+		// Support new-style jobs - look for gather-extra
+		var gatherMustGatherURL *url.URL
+
+		e2eToplinks, err := GetLinksFromURL(e2eURL.String())
 		if err != nil {
-			return []string{}, fmt.Errorf("failed to fetch gather-must-gather link at %s: %v", e2eURL, err)
+			return []string{}, fmt.Errorf("failed to fetch artifacts link at %s: %v", e2eURL, err)
 		}
 		if len(e2eToplinks) == 0 {
 			return []string{}, fmt.Errorf("no top links at %s found", e2eURL)
@@ -139,25 +95,52 @@ func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Re
 				lastPathSegment = linkSplitBySlash[len(linkSplitBySlash)-2]
 			}
 			log.Debugf("lastPathSection: %s", lastPathSegment)
-			if lastPathSegment == artifactsPath {
-				tmpGatherExtraURL := gcsPrefix + link
-				gatherMustGatherURL, err = url.Parse(tmpGatherExtraURL)
+			if lastPathSegment == mustGatherFolderPath {
+				tmpMustGatherURL := gcsPrefix + link
+				gatherMustGatherURL, err = url.Parse(tmpMustGatherURL)
 				if err != nil {
-					return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpGatherExtraURL, err)
+					return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpMustGatherURL, err)
 				}
 				break
 			}
 		}
-		e2eURL = gatherMustGatherURL
-	}
 
-	gcsMustGatherURL := fmt.Sprintf("%s%s", e2eURL.String(), mustGatherPath)
-	tempMustGatherURL := strings.Replace(gcsMustGatherURL, gcsPrefix+"/gcs", storagePrefix, -1)
-	expectedMustGatherURL, err := url.Parse(tempMustGatherURL)
-	if err != nil {
-		return []string{}, fmt.Errorf("failed to parse must-gather link %s: %v", tempMustGatherURL, err)
-	}
-	mustGatherURL := expectedMustGatherURL.String()
-	foundFiles = append(foundFiles, mustGatherURL)
+		if gatherMustGatherURL != nil {
+			e2eToplinks, err = GetLinksFromURL(gatherMustGatherURL.String())
+			if err != nil {
+				return []string{}, fmt.Errorf("failed to fetch gather-must-gather link at %s: %v", e2eURL, err)
+			}
+			if len(e2eToplinks) == 0 {
+				return []string{}, fmt.Errorf("no top links at %s found", e2eURL)
+			}
+			for _, link := range e2eToplinks {
+				log.WithField("link", link).Debug("found link")
+				linkSplitBySlash := strings.Split(link, "/")
+				lastPathSegment := linkSplitBySlash[len(linkSplitBySlash)-1]
+				if len(lastPathSegment) == 0 {
+					lastPathSegment = linkSplitBySlash[len(linkSplitBySlash)-2]
+				}
+				log.Debugf("lastPathSection: %s", lastPathSegment)
+				if lastPathSegment == artifactsPath {
+					tmpGatherExtraURL := gcsPrefix + link
+					gatherMustGatherURL, err = url.Parse(tmpGatherExtraURL)
+					if err != nil {
+						return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpGatherExtraURL, err)
+					}
+					break
+				}
+			}
+			e2eURL = gatherMustGatherURL
+		}
+
+		gcsMustGatherURL := fmt.Sprintf("%s%s", e2eURL.String(), mustGatherPath)
+		tempMustGatherURL := strings.Replace(gcsMustGatherURL, gcsPrefix+"/gcs", storagePrefix, -1)
+		expectedMustGatherURL, err := url.Parse(tempMustGatherURL)
+		if err != nil {
+			return []string{}, fmt.Errorf("failed to parse must-gather link %s: %v", tempMustGatherURL, err)
+		}
+		mustGatherURL := expectedMustGatherURL.String()
+				foundFiles = append(foundFiles, mustGatherURL)
+	*/
 	return foundFiles, nil
 }
