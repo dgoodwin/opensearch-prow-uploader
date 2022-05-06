@@ -51,7 +51,7 @@ func parseAndUploadMonitorEvents(byteValue []byte) error {
 		return err
 	}
 	for _, item := range items.Items {
-		log.Infof("got item: %v", item)
+		log.Debugf("got item: %v", item)
 	}
 	return nil
 }

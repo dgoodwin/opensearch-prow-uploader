@@ -12,32 +12,6 @@ type Scanner struct{}
 
 func (g *Scanner) FindMatchingFiles(baseURL string) ([]*url.URL, error) {
 	foundFiles := []*url.URL{}
-
-	/*
-		prowToplinks, err := GetLinksFromURL(baseURL)
-		if err != nil {
-			return []string{}, fmt.Errorf("failed to find links at %s: %v", prowToplinks, err)
-		}
-		if len(prowToplinks) == 0 {
-			return []string{}, fmt.Errorf("no links found at %s", baseURL)
-		}
-
-		gcsTempURL := ""
-		for _, link := range prowToplinks {
-			log.WithField("link", link).Debug("found link on prow job")
-			if strings.Contains(link, gcsLinkToken) {
-				gcsTempURL = link
-				break
-			}
-		}
-		if gcsTempURL == "" {
-			return []string{}, fmt.Errorf("failed to find GCS link in %v", prowToplinks)
-		}
-		gcsURL, err := url.Parse(gcsTempURL)
-		if err != nil {
-			return []string{}, fmt.Errorf("failed to parse GCS URL %s: %v", gcsTempURL, err)
-		}
-	*/
 	// Find the link to gcs artifacts on the prow job page:
 	gcsURL, err := GetMatchingLinkFromURL(baseURL, regexp.MustCompile(".*gcsweb.*"), false)
 	if err != nil {
@@ -60,22 +34,22 @@ func (g *Scanner) FindMatchingFiles(baseURL string) ([]*url.URL, error) {
 	log.WithField("e2eURL", e2eURL).Info("found e2eURL")
 
 	// Locate gather-extra/artifacts/ for some files:
-	gatherExtraURL, err := GetMatchingLinkFromURL(e2eURL.String(), regexp.MustCompile("gather-extra"), true)
-	if err != nil {
-		return []*url.URL{}, err
-	}
-	gatherExtraURL, err = GetMatchingLinkFromURL(gatherExtraURL.String(), regexp.MustCompile("artifacts"), true)
-	if err != nil {
-		return []*url.URL{}, err
-	}
-	log.WithField("gatherExtraURL", gatherExtraURL).Info("found gatherExtraURL")
-	kubeEventsURL, err := GetMatchingLinkFromURL(gatherExtraURL.String(), regexp.MustCompile("events.json"), true)
-	if err != nil {
-		return []*url.URL{}, err
-	}
-	foundFiles = append(foundFiles, kubeEventsURL)
-
-	log.Info("hey")
+	/*
+		gatherExtraURL, err := GetMatchingLinkFromURL(e2eURL.String(), regexp.MustCompile("gather-extra"), true)
+		if err != nil {
+			return []*url.URL{}, err
+		}
+		gatherExtraURL, err = GetMatchingLinkFromURL(gatherExtraURL.String(), regexp.MustCompile("artifacts"), true)
+		if err != nil {
+			return []*url.URL{}, err
+		}
+		log.WithField("gatherExtraURL", gatherExtraURL).Info("found gatherExtraURL")
+		kubeEventsURL, err := GetMatchingLinkFromURL(gatherExtraURL.String(), regexp.MustCompile("events.json"), true)
+		if err != nil {
+			return []*url.URL{}, err
+		}
+		foundFiles = append(foundFiles, kubeEventsURL)
+	*/
 
 	// Locate openshift-e2e-test for more files:
 	e2eTestFilesURL, err := GetMatchingLinkFromURL(e2eURL.String(), regexp.MustCompile("openshift-e2e-test"), true)
@@ -92,7 +66,7 @@ func (g *Scanner) FindMatchingFiles(baseURL string) ([]*url.URL, error) {
 	}
 	e2eTestFiles, err := GetMatchingLinksFromURL(e2eTestFilesURL.String(), []*regexp.Regexp{
 		regexp.MustCompile("e2e-events_.*\\.json"),
-		regexp.MustCompile("e2e-intervals_everything_.*\\.json"),
+		//regexp.MustCompile("e2e-intervals_everything_.*\\.json"),
 	}, true)
 	if err != nil {
 		return []*url.URL{}, err
@@ -101,71 +75,5 @@ func (g *Scanner) FindMatchingFiles(baseURL string) ([]*url.URL, error) {
 		foundFiles = append(foundFiles, e2ef)
 	}
 
-	/*
-		// Support new-style jobs - look for gather-extra
-		var gatherMustGatherURL *url.URL
-
-		e2eToplinks, err := GetLinksFromURL(e2eURL.String())
-		if err != nil {
-			return []string{}, fmt.Errorf("failed to fetch artifacts link at %s: %v", e2eURL, err)
-		}
-		if len(e2eToplinks) == 0 {
-			return []string{}, fmt.Errorf("no top links at %s found", e2eURL)
-		}
-		for _, link := range e2eToplinks {
-			log.WithField("link", link).Debug("found link")
-			linkSplitBySlash := strings.Split(link, "/")
-			lastPathSegment := linkSplitBySlash[len(linkSplitBySlash)-1]
-			if len(lastPathSegment) == 0 {
-				lastPathSegment = linkSplitBySlash[len(linkSplitBySlash)-2]
-			}
-			log.Debugf("lastPathSection: %s", lastPathSegment)
-			if lastPathSegment == mustGatherFolderPath {
-				tmpMustGatherURL := gcsPrefix + link
-				gatherMustGatherURL, err = url.Parse(tmpMustGatherURL)
-				if err != nil {
-					return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpMustGatherURL, err)
-				}
-				break
-			}
-		}
-
-		if gatherMustGatherURL != nil {
-			e2eToplinks, err = GetLinksFromURL(gatherMustGatherURL.String())
-			if err != nil {
-				return []string{}, fmt.Errorf("failed to fetch gather-must-gather link at %s: %v", e2eURL, err)
-			}
-			if len(e2eToplinks) == 0 {
-				return []string{}, fmt.Errorf("no top links at %s found", e2eURL)
-			}
-			for _, link := range e2eToplinks {
-				log.WithField("link", link).Debug("found link")
-				linkSplitBySlash := strings.Split(link, "/")
-				lastPathSegment := linkSplitBySlash[len(linkSplitBySlash)-1]
-				if len(lastPathSegment) == 0 {
-					lastPathSegment = linkSplitBySlash[len(linkSplitBySlash)-2]
-				}
-				log.Debugf("lastPathSection: %s", lastPathSegment)
-				if lastPathSegment == artifactsPath {
-					tmpGatherExtraURL := gcsPrefix + link
-					gatherMustGatherURL, err = url.Parse(tmpGatherExtraURL)
-					if err != nil {
-						return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpGatherExtraURL, err)
-					}
-					break
-				}
-			}
-			e2eURL = gatherMustGatherURL
-		}
-
-		gcsMustGatherURL := fmt.Sprintf("%s%s", e2eURL.String(), mustGatherPath)
-		tempMustGatherURL := strings.Replace(gcsMustGatherURL, gcsPrefix+"/gcs", storagePrefix, -1)
-		expectedMustGatherURL, err := url.Parse(tempMustGatherURL)
-		if err != nil {
-			return []string{}, fmt.Errorf("failed to parse must-gather link %s: %v", tempMustGatherURL, err)
-		}
-		mustGatherURL := expectedMustGatherURL.String()
-				foundFiles = append(foundFiles, mustGatherURL)
-	*/
 	return foundFiles, nil
 }
