@@ -3,8 +3,11 @@ package cmd
 import (
 	"crypto/tls"
 	"net/http"
+	"regexp"
 
+	"github.com/dgoodwin/opensearch-prow-uploader/pkg/gcsscanner"
 	"github.com/opensearch-project/opensearch-go"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -21,16 +24,20 @@ var uploadProwJobCmd = &cobra.Command{
 	Use:   "upload-prow-job [prowJobURL]",
 	Short: "Upload artifacts from an OpenShift CI prow job to OpenSearch",
 	Run: func(cmd *cobra.Command, args []string) {
+		log.SetLevel(log.DebugLevel)
 		if len(args) < 1 {
 			log.Fatal("missing required argument for prowJobURL")
 		}
 		prowJobURL := args[0]
 		log.WithField("prowJob", prowJobURL).Info("uploading prow job")
-		run()
+		err := run(prowJobURL)
+		if err != nil {
+			log.WithError(err).Fatal("error encountered")
+		}
 	},
 }
 
-func run() {
+func run(prowJobURL string) error {
 	client, err := opensearch.NewClient(opensearch.Config{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -40,11 +47,24 @@ func run() {
 		Password:  opts.Password,
 	})
 	if err != nil {
-		log.WithError(err).Fatal("error connecting to opensearch")
+		return errors.Wrap(err, "error connecting to opensearch")
 	}
 
 	// Print OpenSearch version information on console.
 	log.Info(client.Info())
+
+	scanner := gcsscanner.Scanner{}
+	fileRegexes := []*regexp.Regexp{
+		regexp.MustCompile("e2e-events_.*\\.json"),
+	}
+	fileURLs, err := scanner.FindMatchingFiles(prowJobURL, fileRegexes)
+	if err != nil {
+		return err
+	}
+	for _, fu := range fileURLs {
+		log.WithField("file", fu).Info("found file to upload")
+	}
+	return nil
 }
 
 func init() {
