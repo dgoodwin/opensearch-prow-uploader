@@ -15,7 +15,6 @@ type Scanner struct{}
 func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Regexp) ([]string, error) {
 	foundFiles := []string{}
 
-	// Get a list of links on prow page, we'll be looking for "artifacts":
 	/*
 		prowToplinks, err := GetLinksFromURL(baseURL)
 		if err != nil {
@@ -41,38 +40,44 @@ func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Re
 			return []string{}, fmt.Errorf("failed to parse GCS URL %s: %v", gcsTempURL, err)
 		}
 	*/
-	urls, err := GetMatchingLinksFromURL(baseURL, []*regexp.Regexp{
-		regexp.MustCompile(".*gcsweb.*"),
-	})
-	if len(urls) != 1 {
-		return []string{}, fmt.Errorf("expected 1 GCS URL, found %d on: %s", len(urls), baseURL)
+	// Find the link to gcs artifacts on the prow job page:
+	gcsURL, err := GetMatchingLinkFromURL(baseURL, regexp.MustCompile(".*gcsweb.*"))
+	if err != nil {
+		return []string{}, err
 	}
-	gcsURL := urls[0]
-
 	log.WithField("gcsURL", gcsURL).Info("found GCS URL")
 
-	// check that 'artifacts' folder is present:
-	gcsToplinks, err := GetLinksFromURL(gcsURL.String())
+	artifactsURL, err := GetMatchingLinkFromURL(gcsURL.String(), regexp.MustCompile(".*/artifacts/$"))
 	if err != nil {
-		return []string{}, fmt.Errorf("failed to fetch top-level GCS link at %s: %v", gcsURL, err)
+		return []string{}, err
 	}
-	if len(gcsToplinks) == 0 {
-		return []string{}, fmt.Errorf("no top-level GCS links at %s found", gcsURL)
-	}
-	tmpArtifactsURL := ""
-	for _, link := range gcsToplinks {
-		if strings.HasSuffix(link, "artifacts/") {
-			tmpArtifactsURL = gcsPrefix + link
-			break
+	log.WithField("artifactsURL", artifactsURL).Info("found artifacts URL")
+
+	/*
+		// check that 'artifacts' folder is present:
+		gcsToplinks, err := GetLinksFromURL(gcsURL.String())
+		if err != nil {
+			return []string{}, fmt.Errorf("failed to fetch top-level GCS link at %s: %v", gcsURL, err)
 		}
-	}
-	if tmpArtifactsURL == "" {
-		return []string{}, fmt.Errorf("failed to find artifacts link in %v", gcsToplinks)
-	}
-	artifactsURL, err := url.Parse(tmpArtifactsURL)
-	if err != nil {
-		return []string{}, fmt.Errorf("failed to parse artifacts link %s: %v", tmpArtifactsURL, err)
-	}
+		if len(gcsToplinks) == 0 {
+			return []string{}, fmt.Errorf("no top-level GCS links at %s found", gcsURL)
+		}
+		tmpArtifactsURL := ""
+		for _, link := range gcsToplinks {
+			if strings.HasSuffix(link, "artifacts/") {
+				tmpArtifactsURL = gcsPrefix + link
+				break
+			}
+		}
+		if tmpArtifactsURL == "" {
+			return []string{}, fmt.Errorf("failed to find artifacts link in %v", gcsToplinks)
+		}
+		artifactsURL, err := url.Parse(tmpArtifactsURL)
+		if err != nil {
+			return []string{}, fmt.Errorf("failed to parse artifacts link %s: %v", tmpArtifactsURL, err)
+		}
+
+	*/
 
 	// Get a list of folders and find those which contain e2e, looking for the top level bucket for the job
 	// i.e. e2e-gcp-ovn-upgrade

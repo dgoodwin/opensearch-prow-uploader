@@ -62,6 +62,18 @@ func GetLinksFromURL(url string) ([]string, error) {
 	}
 }
 
+func GetMatchingLinkFromURL(baseURL string, regex *regexp.Regexp) (*url.URL, error) {
+	urls, err := GetMatchingLinksFromURL(baseURL, []*regexp.Regexp{regex})
+	if err != nil {
+		return nil, err
+	}
+	// We're expecting exactly one in this function call, anything else is an error:
+	if len(urls) != 1 {
+		return nil, fmt.Errorf("expected 1 matching URL, found %d on: %s", len(urls), baseURL)
+	}
+	return urls[0], nil
+}
+
 func GetMatchingLinksFromURL(baseURL string, regexes []*regexp.Regexp) ([]*url.URL, error) {
 	allLinks, err := GetLinksFromURL(baseURL)
 	if err != nil {
@@ -89,7 +101,11 @@ func GetMatchingLinksFromURL(baseURL string, regexes []*regexp.Regexp) ([]*url.U
 
 	matchedURLs := make([]*url.URL, len(matchedLinks))
 	for i, ml := range matchedLinks {
-		mURL, err := url.Parse(ml)
+		matchedLink := ml
+		if strings.HasPrefix(ml, "/") {
+			matchedLink = gcsPrefix + ml
+		}
+		mURL, err := url.Parse(matchedLink)
 		if err != nil {
 			return []*url.URL{}, fmt.Errorf("failed to parse URL from link %s: %v", ml, err)
 		}
