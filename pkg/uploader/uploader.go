@@ -2,8 +2,10 @@ package uploader
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,13 +13,13 @@ import (
 
 	"github.com/buger/jsonparser"
 	"github.com/opensearch-project/opensearch-go"
-	"github.com/opensearch-project/opensearch-go/opensearchutil"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 )
 
 type Uploader struct {
 	OpenSearchClient *opensearch.Client
+	User             string
+	Pass             string
 }
 
 func (u *Uploader) ParseAndUpload(prowJobID, fp string) error {
@@ -42,15 +44,13 @@ func (u *Uploader) ParseAndUpload(prowJobID, fp string) error {
 }
 
 func (u *Uploader) parseAndUploadMonitorEvents(prowJobID, fp string, byteValue []byte) error {
-	bulkIndexer, err := opensearchutil.NewBulkIndexer(opensearchutil.BulkIndexerConfig{
-		Index:         prowJobID,
-		Client:        u.OpenSearchClient, // The Elasticsearch client
-		NumWorkers:    2,                  // 1 for now, our free tier server gets cranky with concurrent
-		FlushBytes:    int(1000000),       // The flush threshold in bytes
-		FlushInterval: 10 * time.Second,   // The periodic flush interval
-	})
-	_, err = jsonparser.ArrayEach(byteValue, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-		// Add some additional values:
+
+	// We will bulk post 1000 at a time.
+	chunk := make([][]byte, 0, 1000)
+
+	_, err := jsonparser.ArrayEach(byteValue, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+
+		// Add some additional values before we submit to ElasticSearch:
 		newValue, err2 := jsonparser.Set(value, []byte("\""+filepath.Base(fp)+"\""), "file")
 		if err2 != nil {
 			log.WithError(err2).Error("error setting json value")
@@ -61,68 +61,87 @@ func (u *Uploader) parseAndUploadMonitorEvents(prowJobID, fp string, byteValue [
 			log.WithError(err2).Error("error setting json value")
 			return
 		}
-		//fmt.Println(string(newValue))
 
-		// Add an item to the BulkIndexer
-		//
-		err = bulkIndexer.Add(
-			context.Background(),
-			opensearchutil.BulkIndexerItem{
-				Index: prowJobID,
-				// Action field configures the operation to perform (index, create, delete, update)
-				Action: "index",
-
-				// DocumentID is the (optional) document ID
-				//DocumentID: strconv.Itoa(a.ID),
-
-				// Body is an `io.Reader` with the payload
-				Body: bytes.NewReader(newValue),
-
-				// OnSuccess is called for each successful operation
-				OnSuccess: func(ctx context.Context, item opensearchutil.BulkIndexerItem, res opensearchutil.BulkIndexerResponseItem) {
-					log.Info("successful upload")
-					fmt.Println("successful upload")
-				},
-
-				// OnFailure is called for each failed operation
-				OnFailure: func(ctx context.Context, item opensearchutil.BulkIndexerItem, res opensearchutil.BulkIndexerResponseItem, err error) {
-					fmt.Printf("failed upload err: %s", err)
-					fmt.Printf("failed upload res: %+v", res)
-					if err != nil {
-						log.WithError(err).Error("bulk indexer error")
-					} else {
-						log.WithField("error", res.Error.Reason).Error("bulk indexer error")
-					}
-				},
-			},
-		)
-		if err != nil {
-			log.WithError(err).Error("error adding to bulk indexer")
+		// jsonparser library Set is "experimental" and leaves some the json formatted as it came in, with
+		// our new values add in a somewhat clunky fashion. We need one json document per line to use the bulk
+		// index API, so we unmarshal and marshal to let go clean it up. This is adding a bit of slowness we could
+		// otherwise avoid.
+		var temp map[string]interface{}
+		if err2 = json.Unmarshal(newValue, &temp); err2 != nil {
+			log.WithError(err2).Error("error cleaning up json")
 			return
 		}
+		finalBytes, err2 := json.Marshal(temp)
+		if err != nil {
+			log.WithError(err2).Error("error cleaning up json")
+			return
+		}
+
+		// Add to our chunk array, if we're at 1000 it's time to submit and re-init the array.
+		chunk = append(chunk, finalBytes)
+		if len(chunk) >= 1000 {
+			err2 := u.bulkIndex(prowJobID, chunk)
+			if err2 != nil {
+				log.WithError(err2).Info("error submitting bulk request")
+				return
+			}
+			// Re-initialize the array.
+			chunk = make([][]byte, 0, 1000)
+		}
+
+		//log.Info(string(finalBytes))
 	}, "items")
 	if err != nil {
 		return err
 	}
-	log.Infof("bulk indexer stats: %+v", bulkIndexer.Stats())
-	log.Info("closing indexer")
-	if err := bulkIndexer.Close(context.Background()); err != nil {
-		log.WithError(err).Error("error closing bulk indexer")
+
+	// Upload the remaining chunk:
+	err2 := u.bulkIndex(prowJobID, chunk)
+	if err2 != nil {
+		log.WithError(err2).Info("error submitting bulk request")
+		return nil
 	}
-	log.Infof("bulk indexer stats: %+v", bulkIndexer.Stats())
+
+	return nil
+}
+
+func (u *Uploader) bulkIndex(prowJobID string, chunk [][]byte) error {
+	var bbuf bytes.Buffer
+
+	log.WithField("count", len(chunk)).Info("bulk uploading documents")
+
+	for _, docLine := range chunk {
+		indexLine := fmt.Sprintf("{\"index\":{\"_index\":\"%s\"}}\n", prowJobID)
+		bbuf.Write([]byte(indexLine))
+		bbuf.Write(docLine)
+		bbuf.Write([]byte("\n"))
+	}
+
+	client := &http.Client{
+		Timeout: time.Second * 10,
+	}
+	req, err := http.NewRequest("POST",
+		"https://search-dgoodwin-test-o4g3tsj6smjnfyxybu4m67ospy.us-east-1.es.amazonaws.com/_bulk", &bbuf)
+	req.SetBasicAuth(u.User, u.Pass)
+	req.Header.Set("Content-Type", "application/json")
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 
 	/*
-		var items MonitorEventList
-		err := json.Unmarshal(byteValue, &items)
+		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return err
+			log.Fatal(err)
 		}
-		for _, item := range items.Items {
-			// Add in some additional fields before uploading to opensearch:
-			item.File = filepath.Base(fp)
-			item.ProwJob = prowJobID
-			log.Infof("got item: %v", item)
-		}
+		bodyString := string(bodyBytes)
+		log.Info(bodyString)
 	*/
+
+	log.WithField("status", resp.Status).Info("bulk request made")
 	return nil
 }
