@@ -69,12 +69,37 @@ func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Re
 		return []*url.URL{}, err
 	}
 	log.WithField("gatherExtraURL", gatherExtraURL).Info("found gatherExtraURL")
-
 	kubeEventsURL, err := GetMatchingLinkFromURL(gatherExtraURL.String(), regexp.MustCompile("events.json"), true)
 	if err != nil {
 		return []*url.URL{}, err
 	}
 	foundFiles = append(foundFiles, kubeEventsURL)
+
+	log.Info("hey")
+
+	// Locate openshift-e2e-test for more files:
+	e2eTestFilesURL, err := GetMatchingLinkFromURL(e2eURL.String(), regexp.MustCompile("openshift-e2e-test"), true)
+	if err != nil {
+		return []*url.URL{}, err
+	}
+	e2eTestFilesURL, err = GetMatchingLinkFromURL(e2eTestFilesURL.String(), regexp.MustCompile("^artifacts$"), true)
+	if err != nil {
+		return []*url.URL{}, err
+	}
+	e2eTestFilesURL, err = GetMatchingLinkFromURL(e2eTestFilesURL.String(), regexp.MustCompile("^junit$"), true)
+	if err != nil {
+		return []*url.URL{}, err
+	}
+	e2eTestFiles, err := GetMatchingLinksFromURL(e2eTestFilesURL.String(), []*regexp.Regexp{
+		regexp.MustCompile("e2e-events_.*\\.json"),
+		regexp.MustCompile("e2e-intervals_everything_.*\\.json"),
+	}, true)
+	if err != nil {
+		return []*url.URL{}, err
+	}
+	for _, e2ef := range e2eTestFiles {
+		foundFiles = append(foundFiles, e2ef)
+	}
 
 	/*
 		// Support new-style jobs - look for gather-extra
