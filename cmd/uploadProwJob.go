@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/dgoodwin/opensearch-prow-uploader/pkg/downloader"
 	"github.com/dgoodwin/opensearch-prow-uploader/pkg/gcsscanner"
+	"github.com/dgoodwin/opensearch-prow-uploader/pkg/uploader"
 	"github.com/opensearch-project/opensearch-go"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -59,10 +59,7 @@ func run(prowJobURL string) error {
 	log.Info(client.Info())
 
 	scanner := gcsscanner.Scanner{}
-	fileRegexes := []*regexp.Regexp{
-		regexp.MustCompile("e2e-events_.*\\.json"),
-	}
-	fileURLs, err := scanner.FindMatchingFiles(prowJobURL, fileRegexes)
+	fileURLs, err := scanner.FindMatchingFiles(prowJobURL)
 	if err != nil {
 		return err
 	}
@@ -84,7 +81,15 @@ func run(prowJobURL string) error {
 			return fmt.Errorf("failed to parse URL from %s: %v", fu, err)
 		}
 		fileURLs[i] = newURL
-		downloader.DownloadFile(dir, fileURLs[i])
+		dlfp, err := downloader.DownloadFile(dir, fileURLs[i])
+		if err != nil {
+			return err
+		}
+
+		err = uploader.ParseAndUpload(dlfp)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

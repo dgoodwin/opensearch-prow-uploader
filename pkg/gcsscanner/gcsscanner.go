@@ -10,7 +10,7 @@ import (
 // Scanner locates files in the artifacts Google Cloud Storage sub-buckets for a given prow job URL.
 type Scanner struct{}
 
-func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Regexp) ([]*url.URL, error) {
+func (g *Scanner) FindMatchingFiles(baseURL string) ([]*url.URL, error) {
 	foundFiles := []*url.URL{}
 
 	/*
