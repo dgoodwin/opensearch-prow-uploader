@@ -89,7 +89,8 @@ func run(prowJobURL string) error {
 			return err
 		}
 
-		err = uploader.ParseAndUpload(prowJobID, dlfp)
+		upl := uploader.Uploader{OpenSearchClient: client}
+		err = upl.ParseAndUpload(prowJobID, dlfp)
 		if err != nil {
 			return err
 		}
