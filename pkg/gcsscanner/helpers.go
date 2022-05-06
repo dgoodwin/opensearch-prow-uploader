@@ -62,8 +62,8 @@ func GetLinksFromURL(url string) ([]string, error) {
 	}
 }
 
-func GetMatchingLinkFromURL(baseURL string, regex *regexp.Regexp) (*url.URL, error) {
-	urls, err := GetMatchingLinksFromURL(baseURL, []*regexp.Regexp{regex})
+func GetMatchingLinkFromURL(baseURL string, regex *regexp.Regexp, onlyMatchLastSegment bool) (*url.URL, error) {
+	urls, err := GetMatchingLinksFromURL(baseURL, []*regexp.Regexp{regex}, onlyMatchLastSegment)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func GetMatchingLinkFromURL(baseURL string, regex *regexp.Regexp) (*url.URL, err
 	return urls[0], nil
 }
 
-func GetMatchingLinksFromURL(baseURL string, regexes []*regexp.Regexp) ([]*url.URL, error) {
+func GetMatchingLinksFromURL(baseURL string, regexes []*regexp.Regexp, onlyMatchLastSegment bool) ([]*url.URL, error) {
 	allLinks, err := GetLinksFromURL(baseURL)
 	if err != nil {
 		return []*url.URL{}, fmt.Errorf("failed to fetch links on %s: %v", baseURL, err)
@@ -92,9 +92,11 @@ func GetMatchingLinksFromURL(baseURL string, regexes []*regexp.Regexp) ([]*url.U
 			lastPathSegment = linkSplitBySlash[len(linkSplitBySlash)-2]
 		}
 		for _, re := range regexes {
-			if re.Match([]byte(link)) {
+			if (onlyMatchLastSegment && re.Match([]byte(lastPathSegment))) ||
+				(!onlyMatchLastSegment && re.Match([]byte(link))) {
+
 				log.WithField("link", link).Debug("found link match")
-				matchedLinks = append(matchedLinks /*gcsPrefix+*/, link)
+				matchedLinks = append(matchedLinks, link)
 			}
 		}
 	}

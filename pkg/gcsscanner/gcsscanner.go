@@ -41,76 +41,59 @@ func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Re
 		}
 	*/
 	// Find the link to gcs artifacts on the prow job page:
-	gcsURL, err := GetMatchingLinkFromURL(baseURL, regexp.MustCompile(".*gcsweb.*"))
+	gcsURL, err := GetMatchingLinkFromURL(baseURL, regexp.MustCompile(".*gcsweb.*"), false)
 	if err != nil {
 		return []string{}, err
 	}
 	log.WithField("gcsURL", gcsURL).Info("found GCS URL")
 
-	artifactsURL, err := GetMatchingLinkFromURL(gcsURL.String(), regexp.MustCompile(".*/artifacts/$"))
+	artifactsURL, err := GetMatchingLinkFromURL(gcsURL.String(), regexp.MustCompile("artifacts"), true)
 	if err != nil {
 		return []string{}, err
 	}
 	log.WithField("artifactsURL", artifactsURL).Info("found artifacts URL")
 
+	// Get a list of folders and find those which contain e2e, looking for the top level bucket for the job
+	// i.e. e2e-gcp-ovn-upgrade
+	e2eURL, err := GetMatchingLinkFromURL(artifactsURL.String(), regexp.MustCompile(".*e2e.*"), true)
+	if err != nil {
+		return []string{}, err
+	}
+	log.WithField("e2eURL", e2eURL).Info("found e2eURL")
+
 	/*
-		// check that 'artifacts' folder is present:
-		gcsToplinks, err := GetLinksFromURL(gcsURL.String())
+		artifactLinksToplinks, err := GetLinksFromURL(artifactsURL.String())
 		if err != nil {
-			return []string{}, fmt.Errorf("failed to fetch top-level GCS link at %s: %v", gcsURL, err)
+			return []string{}, fmt.Errorf("failed to fetch artifacts link at %s: %v", gcsURL, err)
 		}
-		if len(gcsToplinks) == 0 {
-			return []string{}, fmt.Errorf("no top-level GCS links at %s found", gcsURL)
+		if len(artifactLinksToplinks) == 0 {
+			return []string{}, fmt.Errorf("no artifact links at %s found", gcsURL)
 		}
-		tmpArtifactsURL := ""
-		for _, link := range gcsToplinks {
-			if strings.HasSuffix(link, "artifacts/") {
-				tmpArtifactsURL = gcsPrefix + link
+		tmpE2eURL := ""
+		for _, link := range artifactLinksToplinks {
+			log.WithField("link", link).Debug("found link")
+			linkSplitBySlash := strings.Split(link, "/")
+			lastPathSegment := linkSplitBySlash[len(linkSplitBySlash)-1]
+			if len(lastPathSegment) == 0 {
+				lastPathSegment = linkSplitBySlash[len(linkSplitBySlash)-2]
+			}
+			log.Debugf("lastPathSection: %s", lastPathSegment)
+			if strings.Contains(lastPathSegment, e2ePrefix) {
+				tmpE2eURL = gcsPrefix + link
 				break
 			}
 		}
-		if tmpArtifactsURL == "" {
-			return []string{}, fmt.Errorf("failed to find artifacts link in %v", gcsToplinks)
+		if tmpE2eURL == "" {
+			return []string{}, fmt.Errorf("failed to find e2e link in %v", artifactLinksToplinks)
 		}
-		artifactsURL, err := url.Parse(tmpArtifactsURL)
+		e2eURL, err := url.Parse(tmpE2eURL)
 		if err != nil {
-			return []string{}, fmt.Errorf("failed to parse artifacts link %s: %v", tmpArtifactsURL, err)
+			return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpE2eURL, err)
 		}
+
+		log.WithField("e2eURL", e2eURL).Info("found e2e link")
 
 	*/
-
-	// Get a list of folders and find those which contain e2e, looking for the top level bucket for the job
-	// i.e. e2e-gcp-ovn-upgrade
-	artifactLinksToplinks, err := GetLinksFromURL(artifactsURL.String())
-	if err != nil {
-		return []string{}, fmt.Errorf("failed to fetch artifacts link at %s: %v", gcsURL, err)
-	}
-	if len(artifactLinksToplinks) == 0 {
-		return []string{}, fmt.Errorf("no artifact links at %s found", gcsURL)
-	}
-	tmpE2eURL := ""
-	for _, link := range artifactLinksToplinks {
-		log.WithField("link", link).Debug("found link")
-		linkSplitBySlash := strings.Split(link, "/")
-		lastPathSegment := linkSplitBySlash[len(linkSplitBySlash)-1]
-		if len(lastPathSegment) == 0 {
-			lastPathSegment = linkSplitBySlash[len(linkSplitBySlash)-2]
-		}
-		log.Debugf("lastPathSection: %s", lastPathSegment)
-		if strings.Contains(lastPathSegment, e2ePrefix) {
-			tmpE2eURL = gcsPrefix + link
-			break
-		}
-	}
-	if tmpE2eURL == "" {
-		return []string{}, fmt.Errorf("failed to find e2e link in %v", artifactLinksToplinks)
-	}
-	e2eURL, err := url.Parse(tmpE2eURL)
-	if err != nil {
-		return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpE2eURL, err)
-	}
-
-	log.WithField("e2eURL", e2eURL).Info("found e2e link")
 
 	// Support new-style jobs - look for gather-extra
 	var gatherMustGatherURL *url.URL
@@ -134,7 +117,7 @@ func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Re
 			tmpMustGatherURL := gcsPrefix + link
 			gatherMustGatherURL, err = url.Parse(tmpMustGatherURL)
 			if err != nil {
-				return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpE2eURL, err)
+				return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpMustGatherURL, err)
 			}
 			break
 		}
@@ -160,7 +143,7 @@ func (g *Scanner) FindMatchingFiles(baseURL string, filenameRegexes []*regexp.Re
 				tmpGatherExtraURL := gcsPrefix + link
 				gatherMustGatherURL, err = url.Parse(tmpGatherExtraURL)
 				if err != nil {
-					return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpE2eURL, err)
+					return []string{}, fmt.Errorf("failed to parse e2e link %s: %v", tmpGatherExtraURL, err)
 				}
 				break
 			}
