@@ -121,7 +121,7 @@ func (u *Uploader) bulkIndex(prowJobID string, chunk [][]byte) error {
 		Timeout: time.Second * 10,
 	}
 	req, err := http.NewRequest("POST",
-		"https://search-dgoodwin-test-o4g3tsj6smjnfyxybu4m67ospy.us-east-1.es.amazonaws.com/_bulk", &bbuf)
+		"https://search-trt-opensearch-test-m4gt2sys3kyzqeqauf4fr27x7u.us-east-1.es.amazonaws.com/_bulk", &bbuf)
 	req.SetBasicAuth(u.User, u.Pass)
 	req.Header.Set("Content-Type", "application/json")
 	if err != nil {

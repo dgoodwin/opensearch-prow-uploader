@@ -50,7 +50,7 @@ func run(prowJobURL string) error {
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
-		Addresses: []string{"https://search-dgoodwin-test-o4g3tsj6smjnfyxybu4m67ospy.us-east-1.es.amazonaws.com"},
+		Addresses: []string{"https://search-trt-opensearch-test-m4gt2sys3kyzqeqauf4fr27x7u.us-east-1.es.amazonaws.com"},
 		Username:  opts.Username, // For testing only. Don't store credentials in code.
 		Password:  opts.Password,
 	})
