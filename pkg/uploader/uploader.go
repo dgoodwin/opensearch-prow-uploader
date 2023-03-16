@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/buger/jsonparser"
 	"github.com/opensearch-project/opensearch-go"
 	log "github.com/sirupsen/logrus"
 )
@@ -20,6 +20,69 @@ type Uploader struct {
 	OpenSearchClient *opensearch.Client
 	User             string
 	Pass             string
+}
+
+// Types from origin monitorapi package
+
+type Condition struct {
+	Level string
+
+	Locator string
+	Message string
+}
+
+type EventInterval struct {
+	Condition
+	OpenSearchMetadata
+
+	From time.Time
+	To   time.Time
+}
+
+// OpenSearchMetadata are values we inject into the intervals from origin.
+type OpenSearchMetadata struct {
+	File     string
+	ProwJob  string
+	Duration string
+}
+
+type EventIntervalList struct {
+	Items []EventInterval
+}
+
+type EventLevel int
+
+const (
+	Info EventLevel = iota
+	Warning
+	Error
+)
+
+func (e EventLevel) String() string {
+	switch e {
+	case Info:
+		return "Info"
+	case Warning:
+		return "Warning"
+	case Error:
+		return "Error"
+	default:
+		panic(fmt.Sprintf("did not define event level string for %d", e))
+	}
+}
+
+func EventLevelFromString(s string) (EventLevel, error) {
+	switch s {
+	case "Info":
+		return Info, nil
+	case "Warning":
+		return Warning, nil
+	case "Error":
+		return Error, nil
+	default:
+		return Error, fmt.Errorf("did not define event level string for %q", s)
+	}
+
 }
 
 func (u *Uploader) ParseAndUpload(prowJobID, fp string) error {
@@ -45,54 +108,52 @@ func (u *Uploader) ParseAndUpload(prowJobID, fp string) error {
 
 func (u *Uploader) parseAndUploadMonitorEvents(prowJobID, fp string, byteValue []byte) error {
 
+	allIntervals := EventIntervalList{}
+	err := json.Unmarshal(byteValue, &allIntervals)
+	if err != nil {
+		return err
+	}
+
+	log.WithField("intervals", len(allIntervals.Items)).Info("parsed json intervals")
+
 	// We will bulk post 1000 at a time.
 	chunk := make([][]byte, 0, 1000)
+	totalUploaded := 0
 
-	_, err := jsonparser.ArrayEach(byteValue, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+	//_, err := jsonparser.ArrayEach(byteValue, func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+	for i := range allIntervals.Items {
 
 		// Add some additional values before we submit to ElasticSearch:
-		newValue, err2 := jsonparser.Set(value, []byte("\""+filepath.Base(fp)+"\""), "file")
-		if err2 != nil {
-			log.WithError(err2).Error("error setting json value")
-			return
-		}
-		newValue, err2 = jsonparser.Set(newValue, []byte("\""+prowJobID+"\""), "prowJob")
-		if err2 != nil {
-			log.WithError(err2).Error("error setting json value")
-			return
-		}
+		allIntervals.Items[i].File = filepath.Base(fp)
+		allIntervals.Items[i].ProwJob = prowJobID
 
-		// jsonparser library Set is "experimental" and leaves some the json formatted as it came in, with
-		// our new values add in a somewhat clunky fashion. We need one json document per line to use the bulk
+		// inject a duration in seconds, this will be used for the opensearch gantt chart:
+		dur := allIntervals.Items[i].To.Sub(allIntervals.Items[i].From)
+		durInt := int64(math.Round(dur.Seconds()))
+		allIntervals.Items[i].Duration = fmt.Sprintf("%ds", durInt)
+
+		// We need one json document per line to use the bulk
 		// index API, so we unmarshal and marshal to let go clean it up. This is adding a bit of slowness we could
 		// otherwise avoid.
-		var temp map[string]interface{}
-		if err2 = json.Unmarshal(newValue, &temp); err2 != nil {
-			log.WithError(err2).Error("error cleaning up json")
-			return
-		}
-		finalBytes, err2 := json.Marshal(temp)
+		finalBytes, err2 := json.Marshal(allIntervals.Items[i])
 		if err != nil {
-			log.WithError(err2).Error("error cleaning up json")
-			return
+			log.WithError(err2).Error("error marshalling json")
+			return err
 		}
+		log.Debugf("finalBytes: %s", finalBytes)
 
 		// Add to our chunk array, if we're at 1000 it's time to submit and re-init the array.
 		chunk = append(chunk, finalBytes)
 		if len(chunk) >= 1000 {
 			err2 := u.bulkIndex(prowJobID, chunk)
+			totalUploaded += len(chunk)
 			if err2 != nil {
 				log.WithError(err2).Info("error submitting bulk request")
-				return
+				return err2
 			}
 			// Re-initialize the array.
 			chunk = make([][]byte, 0, 1000)
 		}
-
-		//log.Info(string(finalBytes))
-	}, "items")
-	if err != nil {
-		return err
 	}
 
 	// Upload the remaining chunk:
@@ -101,6 +162,9 @@ func (u *Uploader) parseAndUploadMonitorEvents(prowJobID, fp string, byteValue [
 		log.WithError(err2).Info("error submitting bulk request")
 		return nil
 	}
+	totalUploaded += len(chunk)
+
+	log.WithField("uploaded", totalUploaded).Info("finished upload")
 
 	return nil
 }

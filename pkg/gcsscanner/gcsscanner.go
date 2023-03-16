@@ -52,7 +52,7 @@ func (g *Scanner) FindMatchingFiles(baseURL string) ([]*url.URL, error) {
 	*/
 
 	// Locate openshift-e2e-test for more files:
-	e2eTestFilesURL, err := GetMatchingLinkFromURL(e2eURL.String(), regexp.MustCompile("openshift-e2e-test"), true)
+	e2eTestFilesURL, err := GetMatchingLinkFromURL(e2eURL.String(), regexp.MustCompile("openshift-e2e-test$"), true)
 	if err != nil {
 		return []*url.URL{}, err
 	}
